@@ -1,0 +1,1 @@
+snowball = { name = 'snowball', label = 'snowball', type = 'item',weight = 1, image = 'snowball.png',unique = true, useable = true, shouldClose = true, description = 'snowball' },

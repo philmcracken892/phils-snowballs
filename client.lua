@@ -235,7 +235,7 @@ function CreatePrompts()
     
     PickupPrompt = PromptRegisterBegin()
     PromptSetControlAction(PickupPrompt, 0xCEFD9220) -- E key
-    PromptSetText(PickupPrompt, CreateVarString(10, "LITERAL_STRING", "Pick Up Snowball"))
+    PromptSetText(PickupPrompt, CreateVarString(10, "LITERAL_STRING", "Pick Up Snowball /snowball to Toggle"))
     PromptSetEnabled(PickupPrompt, true)
     PromptSetVisible(PickupPrompt, true)
     PromptSetHoldMode(PickupPrompt, true)

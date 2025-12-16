@@ -1,11 +1,9 @@
 local RSGCore = exports['rsg-core']:GetCoreObject()
 
-
 local snowballModel = nil
 local snowballHash = nil
 local animDict = nil
 local animName = nil
-
 
 local isReady = false
 local isThrowing = false
@@ -17,24 +15,168 @@ local isInSnowZone = false
 local activeSnowballs = {}
 local cachedSnowballCount = 0
 
-
 local PickupPrompt = nil
 local PickupGroup = nil
 
+-- Snow surface material hashes for RDR2/RedM
+local SnowMaterialHashes = {
+    -- Common snow hashes
+    951832588,
+    -1520033454,
+    -1942642813,
+    -824037923,
+    1635579929,
+    -1286696947,
+    -1885547121,
+    -461723753,
+    -- Ice hashes
+    -897054847,
+    126657546,
+}
 
+-- Snow weather types
+local SnowWeatherHashes = {
+    GetHashKey("SNOW"),
+    GetHashKey("BLIZZARD"),
+    GetHashKey("SNOWLIGHT"),
+    GetHashKey("WHITEOUT"),
+    GetHashKey("SNOWCLEARING"),
+    GetHashKey("GROUNDBLIZZARD"),
+    GetHashKey("SLEET"),
+}
+
+----------------------------------------------------------------
+-- SNOW DETECTION FUNCTIONS
+----------------------------------------------------------------
 function IsXmasEnabled()
     return Config.EnableXmas == true
 end
 
+-- Check if current weather is snowy
+function IsSnowWeather()
+    local currentWeather = GetPrevWeatherTypeHashName()
+    local nextWeather = GetNextWeatherTypeHashName()
+    
+    for _, weatherHash in ipairs(SnowWeatherHashes) do
+        if currentWeather == weatherHash or nextWeather == weatherHash then
+            return true
+        end
+    end
+    
+    return false
+end
+
+-- Check if standing on snow/ice ground using raycast
+function IsOnSnowGround()
+    local ped = PlayerPedId()
+    local coords = GetEntityCoords(ped)
+    
+    -- Cast a ray downward to get ground material
+    local startPos = vector3(coords.x, coords.y, coords.z + 0.5)
+    local endPos = vector3(coords.x, coords.y, coords.z - 2.0)
+    
+    local rayHandle = StartShapeTestRay(startPos.x, startPos.y, startPos.z, 
+                                         endPos.x, endPos.y, endPos.z, 
+                                         1, ped, 7)
+    
+    local retval, hit, endCoords, surfaceNormal, materialHash = GetShapeTestResultIncludingMaterial(rayHandle)
+    
+    if hit and materialHash then
+        for _, snowHash in ipairs(SnowMaterialHashes) do
+            if materialHash == snowHash then
+                return true
+            end
+        end
+        
+        -- Also check using string comparison for material names
+        local materialName = tostring(materialHash)
+        if string.find(string.lower(materialName), "snow") or string.find(string.lower(materialName), "ice") then
+            return true
+        end
+    end
+    
+    return false
+end
+
+-- Alternative method using ground probe
+function IsOnSnowGroundAlt()
+    local ped = PlayerPedId()
+    local coords = GetEntityCoords(ped)
+    
+    -- Use native to get surface material at coordinates
+    local groundHash = Citizen.InvokeNative(0x39C0F30A0D8C1A5B, coords.x, coords.y, coords.z, Citizen.ResultAsInteger())
+    
+    if groundHash then
+        for _, snowHash in ipairs(SnowMaterialHashes) do
+            if groundHash == snowHash then
+                return true
+            end
+        end
+    end
+    
+    return false
+end
+
+-- Check if in known snowy regions based on coordinates (Grizzlies, Ambarino, etc.)
+function IsInSnowyRegion()
+    local ped = PlayerPedId()
+    local coords = GetEntityCoords(ped)
+    
+    -- The Grizzlies and Ambarino are generally in the northern part of the map
+    -- High elevation + northern coordinates typically mean snow
+    
+    -- Grizzlies West, Grizzlies East, Ambarino region
+    if coords.y > 1200.0 and coords.z > 100.0 then
+        return true
+    end
+    
+    -- Colter area
+    if coords.x > -1500.0 and coords.x < -1000.0 and coords.y > 1200.0 and coords.y < 1600.0 then
+        return true
+    end
+    
+    -- Mount Hagen area
+    if coords.x > -2200.0 and coords.x < -1800.0 and coords.y > 800.0 and coords.y < 1200.0 then
+        return true
+    end
+    
+    return false
+end
+
+-- Main function to check if in snow zone (combines all methods)
 function CheckIfInSnowZone(coords)
+    -- Priority 1: Christmas mode overrides everything
     if IsXmasEnabled() then
         return true, "Christmas"
     end
     
-    for _, zone in ipairs(Config.Snowball.SnowZones) do
-        local distance = #(coords - zone.coords)
-        if distance <= zone.radius then
-            return true, zone.name
+    -- Priority 2: Check if standing on snow ground
+    if IsOnSnowGround() then
+        return true, "Snow Ground"
+    end
+    
+    -- Priority 3: Check alternative ground detection
+    if IsOnSnowGroundAlt() then
+        return true, "Snow Ground"
+    end
+    
+    -- Priority 4: Check current weather
+    if IsSnowWeather() then
+        return true, "Snow Weather"
+    end
+    
+    -- Priority 5: Check if in known snowy region
+    if IsInSnowyRegion() then
+        return true, "Snowy Region"
+    end
+    
+    -- Priority 6: Fallback to config zones if they exist
+    if Config.Snowball.SnowZones and #Config.Snowball.SnowZones > 0 then
+        for _, zone in ipairs(Config.Snowball.SnowZones) do
+            local distance = #(coords - zone.coords)
+            if distance <= zone.radius then
+                return true, zone.name
+            end
         end
     end
     
@@ -67,23 +209,19 @@ function GetCameraDirection()
     return direction
 end
 
-
 function UpdateSnowballCount()
     RSGCore.Functions.TriggerCallback('rsg-snowball:server:getcount', function(amount)
         cachedSnowballCount = amount or 0
     end)
 end
 
-
 function GetSnowballCount()
     return cachedSnowballCount
 end
 
-
 function HasSnowballs()
     return cachedSnowballCount > 0
 end
-
 
 function CreatePrompts()
     PickupGroup = GetRandomIntInRange(0, 0xffffff)
@@ -96,35 +234,25 @@ function CreatePrompts()
     PromptSetHoldMode(PickupPrompt, true)
     PromptSetGroup(PickupPrompt, PickupGroup, 0)
     PromptRegisterEnd(PickupPrompt)
-    
-    
 end
 
 ----------------------------------------------------------------
 -- INITIALIZATION
 ----------------------------------------------------------------
 CreateThread(function()
-    
-    
     -- Wait for config
     while Config == nil or Config.Snowball == nil do
-       
         Wait(100)
     end
     
     if not Config.Snowball.Enabled then
-        
         return
     end
-    
     
     snowballModel = Config.Snowball.Model
     snowballHash = GetHashKey(snowballModel)
     animDict = Config.Snowball.AnimDict
     animName = Config.Snowball.AnimName
-    
-    
-    
     
     RequestAnimDict(animDict)
     local timeout = 0
@@ -132,12 +260,9 @@ CreateThread(function()
         Wait(10)
         timeout = timeout + 10
         if timeout > 5000 then
-            
             return
         end
     end
-    
-    
     
     RequestModel(snowballHash, false)
     timeout = 0
@@ -145,22 +270,16 @@ CreateThread(function()
         Wait(10)
         timeout = timeout + 10
         if timeout > 5000 then
-            
             return
         end
     end
     
-    
-    
     CreatePrompts()
     
     isReady = true
-   
     
-   
     UpdateSnowballCount()
 end)
-
 
 CreateThread(function()
     while true do
@@ -170,7 +289,6 @@ CreateThread(function()
         end
     end
 end)
-
 
 function PickupSnowball()
     if not CanPickupSnow() then return end
@@ -191,8 +309,6 @@ function PickupSnowball()
     
     isPickingUp = false
 end
-
-
 
 function GetNearbyPeds(coords, radius)
     local peds = {}
@@ -221,32 +337,24 @@ function ApplyDamage(ped, isPlayer)
     
     local damage = isPlayer and Config.Snowball.Damage.PlayerDamage or Config.Snowball.Damage.NPCDamage
     
-    
     ApplyDamageToPed(ped, damage, true, true, true)
     
-    
     if not isPlayer then
-        
         ClearPedTasksImmediately(ped)
-        
-        
         SetPedToRagdoll(ped, 1000, 1000, 0, true, true, false)
-        
         
         if not IsEntityDead(ped) then
             Wait(1000)
             TaskSmartFleePed(ped, PlayerPedId(), 100.0, -1, false, false)
         end
     end
-    -- Ragdoll chance for all peds
+    
     if Config.Snowball.Damage.Ragdoll then
         local chance = math.random(1, 100)
         if chance <= Config.Snowball.Damage.RagdollChance then
             SetPedToRagdoll(ped, Config.Snowball.Damage.RagdollDuration, Config.Snowball.Damage.RagdollDuration, 0, true, true, false)
         end
     end
-    
-    
 end
 
 function CheckSnowballHit(snowball, targetPed)
@@ -255,10 +363,8 @@ function CheckSnowballHit(snowball, targetPed)
     local coords = GetEntityCoords(snowball)
     local hasCollided = HasEntityCollidedWithAnything(snowball)
     
-    
     local hitRadius = Config.Snowball.Damage.HitRadius * 1.5
     
-   
     if targetPed and DoesEntityExist(targetPed) then
         local targetCoords = GetEntityCoords(targetPed)
         local distToTarget = #(coords - targetCoords)
@@ -281,7 +387,6 @@ function CheckSnowballHit(snowball, targetPed)
         end
     end
     
-   
     local nearbyPeds = GetNearbyPeds(coords, hitRadius)
     
     for _, pedData in ipairs(nearbyPeds) do
@@ -301,7 +406,6 @@ function CheckSnowballHit(snowball, targetPed)
         return true
     end
     
-    
     if hasCollided then
         DeleteEntity(snowball)
         return true
@@ -309,7 +413,6 @@ function CheckSnowballHit(snowball, targetPed)
     
     return false
 end
-
 
 CreateThread(function()
     while true do
@@ -330,12 +433,10 @@ CreateThread(function()
     end
 end)
 
-
 function GetNearbyTargets(radius, includeNPCs)
     local targets = {}
     local myPed = PlayerPedId()
     local myPos = GetEntityCoords(myPed)
-    
     
     local pool = GetGamePool('CPed')
     
@@ -347,15 +448,12 @@ function GetNearbyTargets(radius, includeNPCs)
             if distance <= radius then
                 local isPlayer = IsPedAPlayer(ped)
                 
-               
                 if isPlayer or includeNPCs then
-                    
                     local raycast = StartShapeTestRay(myPos.x, myPos.y, myPos.z + 0.5, 
                                                       pedPos.x, pedPos.y, pedPos.z + 0.5, 
                                                       -1, myPed, 0)
                     local _, hit, _, _, entityHit = GetShapeTestResult(raycast)
                     
-                   
                     if not hit or entityHit == ped then
                         table.insert(targets, {
                             ped = ped,
@@ -374,7 +472,7 @@ function GetNearbyTargets(radius, includeNPCs)
 end
 
 function GetEntityInCrosshair()
-    local nearbyTargets = GetNearbyTargets(Config.Snowball.AimDistance, true) -- true = include NPCs
+    local nearbyTargets = GetNearbyTargets(Config.Snowball.AimDistance, true)
     local bestTarget = nil
     local bestScore = -1
     
@@ -421,7 +519,6 @@ function DrawTargetMarker(target)
     end
 end
 
-
 function SpawnSnowball(ped)
     local pos = GetEntityCoords(ped)
     local velocity
@@ -433,30 +530,21 @@ function SpawnSnowball(ped)
         local targetPos = GetEntityCoords(targetEntity.ped)
         local distance = #(targetPos - pos)
         
-        
         targetPos = vector3(targetPos.x, targetPos.y, targetPos.z + 0.5)
-        
         
         local direction = Normalize(targetPos - pos)
         
-       
         local arc = math.max(0.2, distance * 0.015)
         direction = vector3(direction.x, direction.y, direction.z + arc)
         
-        
         local force = throwForce + (distance * 0.8)
         velocity = Normalize(direction) * force
-        
-        
     else
-        
         local camDir = GetCameraDirection()
-       
         camDir = vector3(camDir.x, camDir.y, camDir.z + 0.2)
         velocity = Normalize(camDir) * throwForce
     end
     
-   
     local forward = GetEntityForwardVector(ped)
     local spawnPos = vector3(
         pos.x + forward.x,
@@ -464,23 +552,18 @@ function SpawnSnowball(ped)
         pos.z + 1.2
     )
     
-    
     local snowball = CreateObject(snowballHash, spawnPos.x, spawnPos.y, spawnPos.z, true, true, false)
     if not DoesEntityExist(snowball) then return false end
-    
     
     SetEntityVisible(snowball, true)
     SetEntityCollision(snowball, true, true)
     SetEntityDynamic(snowball, true)
     FreezeEntityPosition(snowball, false)
     
-    
     ActivatePhysics(snowball)
     Wait(50)
     
-    
     SetEntityVelocity(snowball, velocity.x, velocity.y, velocity.z)
-    
     
     table.insert(activeSnowballs, { 
         entity = snowball, 
@@ -497,7 +580,6 @@ function ThrowSnowball()
     local ped = PlayerPedId()
     if IsEntityDead(ped) or IsPedInAnyVehicle(ped, false) then return false end
     
-   
     if cachedSnowballCount <= 0 then
         lib.notify({ title = 'Snowball', description = 'No snowballs in inventory!', type = 'error', duration = 3000 })
         return false
@@ -505,28 +587,21 @@ function ThrowSnowball()
     
     isThrowing = true
     
-    
     TriggerServerEvent('rsg-snowball:server:throw')
     cachedSnowballCount = cachedSnowballCount - 1
     
-    
     TaskPlayAnim(ped, animDict, animName, 1.0, 1.0, 1000, 0, 0, false, false, false, false, false)
     
-   
     Wait(400)
-    
     
     SpawnSnowball(ped)
     
-    
     Wait(600)
-    
     
     ClearPedTasks(ped)
     
     targetEntity = nil
     isThrowing = false
-    
     
     UpdateSnowballCount()
     
@@ -534,7 +609,6 @@ function ThrowSnowball()
 end
 
 function ToggleAiming()
-    
     if cachedSnowballCount <= 0 then
         lib.notify({ title = 'Snowball', description = 'No snowballs to aim!', type = 'error', duration = 3000 })
         isAiming = false
@@ -559,24 +633,18 @@ CreateThread(function()
         Wait(0)
         
         if isReady and not isThrowing and not isPickingUp then
-            -- G key to throw
             if IsControlJustPressed(0, 0x760A9C6F) then -- G key
                 ThrowSnowball()
             end
             
-            -- B key to toggle aim
             if IsControlJustPressed(0, 0x4CC0E2FE) then -- B key
                 ToggleAiming()
             end
             
-            
             if isAiming then
-                
                 if IsControlJustPressed(0, 0x3076E97C) then -- Mouse wheel up
-                    
                     local targets = GetNearbyTargets(Config.Snowball.AimDistance, true)
                     if #targets > 1 then
-                        
                         local currentIndex = 0
                         for i, t in ipairs(targets) do
                             if targetEntity and t.ped == targetEntity.ped then
@@ -606,6 +674,8 @@ CreateThread(function()
     end
     
     local wasInZone = false
+    local lastZoneCheck = 0
+    local zoneCheckInterval = 500 -- Check every 500ms instead of every frame
     
     while true do
         Wait(0)
@@ -615,18 +685,25 @@ CreateThread(function()
         local inVehicle = IsPedInAnyVehicle(ped, false)
         local isDead = IsEntityDead(ped)
         
-        
-        local inZone, zoneName = CheckIfInSnowZone(coords)
-        isInSnowZone = inZone
-        
-       
-        if inZone and not wasInZone then
-            lib.notify({ title = 'Snow Zone', description = 'You can pick up snowballs here!', type = 'inform', duration = 4000 })
+        -- Only check zone status periodically to save performance
+        local currentTime = GetGameTimer()
+        if currentTime - lastZoneCheck > zoneCheckInterval then
+            lastZoneCheck = currentTime
+            
+            local inZone, zoneName = CheckIfInSnowZone(coords)
+            isInSnowZone = inZone
+            
+            if inZone and not wasInZone then
+                local message = zoneName == "Snow Ground" and 'Standing on snow - you can pick up snowballs!' or 
+                               zoneName == "Snow Weather" and 'Snowy weather - you can pick up snowballs!' or
+                               zoneName == "Snowy Region" and 'In snowy region - you can pick up snowballs!' or
+                               'You can pick up snowballs here!'
+                lib.notify({ title = 'Snow Zone', description = message, type = 'inform', duration = 4000 })
+            end
+            wasInZone = inZone
         end
-        wasInZone = inZone
         
-        
-        if inZone and not inVehicle and not isDead and not isPickingUp and not isThrowing then
+        if isInSnowZone and not inVehicle and not isDead and not isPickingUp and not isThrowing then
             if PickupPrompt and PickupGroup then
                 local label = CreateVarString(10, "LITERAL_STRING", "Snow")
                 PromptSetActiveGroupThisFrame(PickupGroup, label)
@@ -638,13 +715,11 @@ CreateThread(function()
             end
         end
         
-        -- AUTO-DISABLE AIM MODE WHEN NO SNOWBALLS
         if isAiming and cachedSnowballCount <= 0 then
             isAiming = false
             targetEntity = nil
         end
         
-        -- Only draw target marker if aiming AND have snowballs
         if isAiming and not isThrowing and cachedSnowballCount > 0 then
             targetEntity = GetEntityInCrosshair()
             if targetEntity then
@@ -657,14 +732,6 @@ end)
 ----------------------------------------------------------------
 -- HUD
 ----------------------------------------------------------------
-local function DrawTexture(textureStreamed, textureName, x, y, width, height, rotation, r, g, b, a)
-    if not HasStreamedTextureDictLoaded(textureStreamed) then
-        RequestStreamedTextureDict(textureStreamed, false)
-    else
-        DrawSprite(textureStreamed, textureName, x, y, width, height, rotation, r, g, b, a, false)
-    end
-end
-
 CreateThread(function()
     while true do
         if Config.Snowball and Config.Snowball.ShowHUD and isReady and cachedSnowballCount > 0 then
@@ -681,10 +748,8 @@ CreateThread(function()
             local hudX = 0.5
             local hudY = 0.85
             
-            -- Draw main background
             DrawTexture("generic_textures", "default_pedshot", hudX, hudY + 0.03, 0.15, 0.1, 0.0, bgR, bgG, bgB, 180)
             
-            -- Draw snowball count
             SetTextScale(0.45, 0.45)
             SetTextColor(r, g, b, 255)
             SetTextCentre(true)
@@ -692,18 +757,15 @@ CreateThread(function()
             local countStr = CreateVarString(10, "LITERAL_STRING", "Snowballs: " .. cachedSnowballCount)
             DisplayText(countStr, hudX, hudY)
             
-            -- Draw key prompts
             SetTextScale(0.28, 0.28)
             SetTextColor(r, g, b, 200)
             SetTextCentre(true)
             SetTextDropshadow(1, 0, 0, 0, 255)
             
             if isAiming then
-                -- Aiming mode keys
                 local aimStr = CreateVarString(10, "LITERAL_STRING", "[G] Throw    [B] Cancel")
                 DisplayText(aimStr, hudX, hudY + 0.04)
             else
-                -- Normal mode keys
                 local normalStr = CreateVarString(10, "LITERAL_STRING", "[G] Throw    [B] Aim")
                 DisplayText(normalStr, hudX, hudY + 0.04)
             end
@@ -714,7 +776,7 @@ CreateThread(function()
 end)
 
 ----------------------------------------------------------------
--- EVENTS & REMAINING CODE STAYS THE SAME
+-- EVENTS
 ----------------------------------------------------------------
 RegisterNetEvent('rsg-snowball:client:hit', function(damage)
     local ped = PlayerPedId()
@@ -743,14 +805,13 @@ RegisterNetEvent('RSGCore:Client:OnPlayerLoaded', function()
     UpdateSnowballCount()
 end)
 
-
-
 ----------------------------------------------------------------
 -- EXPORTS
 ----------------------------------------------------------------
 exports('GetSnowballCount', GetSnowballCount)
 exports('ThrowSnowball', ThrowSnowball)
 exports('HasSnowballs', HasSnowballs)
+exports('IsInSnowZone', function() return isInSnowZone end)
 
 ----------------------------------------------------------------
 -- CLEANUP
@@ -769,6 +830,4 @@ AddEventHandler('onResourceStop', function(name)
     
     if animDict then RemoveAnimDict(animDict) end
     if snowballHash then SetModelAsNoLongerNeeded(snowballHash) end
-    
-    
 end)

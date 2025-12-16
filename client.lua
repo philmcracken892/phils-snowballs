@@ -178,29 +178,20 @@ function PickupSnowball()
     isPickingUp = true
     local ped = PlayerPedId()
     
-    
     TaskStartScenarioInPlace(ped, `WORLD_HUMAN_CROUCH_INSPECT`, 0, true)
     
-    if lib.progressBar({
-        duration = 2000,
-        label = 'Picking up snow...',
-        useWhileDead = false,
-        canCancel = true,
-        disable = { move = true, car = true, combat = true },
-    }) then
-        lastPickupTime = GetGameTimer()
-        
-        
-        TriggerServerEvent('rsg-snowball:server:pickup', Config.Snowball.Pickup.Amount)
-        Wait(500)
-        UpdateSnowballCount()
-    end
+    Wait(2000)
     
+    lastPickupTime = GetGameTimer()
+    TriggerServerEvent('rsg-snowball:server:pickup', Config.Snowball.Pickup.Amount)
+    Wait(500)
+    UpdateSnowballCount()
     
     ClearPedTasks(ped)
     
     isPickingUp = false
 end
+
 
 
 function GetNearbyPeds(coords, radius)

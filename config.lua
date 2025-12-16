@@ -1,6 +1,6 @@
 Config = {}
 
-Config.EnableXmas = false -- Set to true to allow snowball pickup everywhere
+Config.EnableXmas = false -- Set to true to allow snowball pickup everywhere (overrides all detection)
 
 Config.Snowball = {
     Enabled = true,
@@ -11,9 +11,7 @@ Config.Snowball = {
     AnimName = "throw_m_fb_stand",
     
     ThrowForce = 60.0,
-    AimDistance = 50.0,
-    DefaultAmount = 10,
-    MaxAmount = 10,
+    AimDistance = 60.0,
     ShowHUD = true,
     
     Pickup = {
@@ -25,15 +23,13 @@ Config.Snowball = {
         Enabled = true,
         PlayerDamage = 5,
         NPCDamage = 10,
-        HitRadius = 5.5,
+        HitRadius = 10.5,
         Ragdoll = true,
         RagdollChance = 30,
         RagdollDuration = 2000,
     },
     
-    SnowZones = {
-        { name = "Colter", coords = vector3(vector3(-734.43, 1849.86, 330.13)), radius = 500.0 },
-        { name = "Cairn Lake", coords = vector3(-1320.0, 1950.0, 260.0), radius = 550.0 },
-        -- Add more zones as needed
-    },
+    -- OPTIONAL: Manual zones as fallback (can be empty or removed entirely)
+    -- Only used if automatic snow detection fails
+    SnowZones = {},
 }

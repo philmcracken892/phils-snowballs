@@ -408,6 +408,14 @@ function GetEntityInCrosshair()
     return bestTarget
 end
 
+local function DrawTexture(textureStreamed, textureName, x, y, width, height, rotation, r, g, b, a)
+    if not HasStreamedTextureDictLoaded(textureStreamed) then
+        RequestStreamedTextureDict(textureStreamed, false)
+    else
+        DrawSprite(textureStreamed, textureName, x, y, width, height, rotation, r, g, b, a, false)
+    end
+end
+
 function DrawTargetMarker(target)
     local pos = GetEntityCoords(target.ped)
     local r, g, b = 255, 50, 50 
@@ -416,19 +424,9 @@ function DrawTargetMarker(target)
         r, g, b = 255, 150, 50 
     end
     
-    DrawMarker(0x94FDAE17, pos.x, pos.y, pos.z + 1.3, 0, 0, 0, 0, 0, 0, 0.4, 0.4, 0.4, r, g, b, 200, false, false, 2, false, nil, nil, false)
-    
-   
-    local onScreen, screenX, screenY = GetScreenCoordFromWorldCoord(pos.x, pos.y, pos.z + 1.5)
+    local onScreen, screenX, screenY = GetScreenCoordFromWorldCoord(pos.x, pos.y, pos.z + 0.5)
     if onScreen then
-        SetTextScale(0.3, 0.3)
-        SetTextColor(r, g, b, 255)
-        SetTextCentre(true)
-        SetTextDropshadow(1, 0, 0, 0, 255)
-        local text = target.isPlayer and "PLAYER" or "NPC"
-        text = text .. " [" .. math.floor(target.distance) .. "m]"
-        local str = CreateVarString(10, "LITERAL_STRING", text)
-        DisplayText(str, screenX, screenY)
+        DrawTexture("overhead", "overhead_marked_for_death", screenX, screenY, 0.02, 0.035, 0.0, r, g, b, 240)
     end
 end
 
@@ -668,24 +666,56 @@ end)
 ----------------------------------------------------------------
 -- HUD
 ----------------------------------------------------------------
+local function DrawTexture(textureStreamed, textureName, x, y, width, height, rotation, r, g, b, a)
+    if not HasStreamedTextureDictLoaded(textureStreamed) then
+        RequestStreamedTextureDict(textureStreamed, false)
+    else
+        DrawSprite(textureStreamed, textureName, x, y, width, height, rotation, r, g, b, a, false)
+    end
+end
+
 CreateThread(function()
     while true do
         if Config.Snowball and Config.Snowball.ShowHUD and isReady and cachedSnowballCount > 0 then
             Wait(0)
             
-            local text
+            local r, g, b = 255, 255, 255
+            local bgR, bgG, bgB = 0, 0, 0
+            
             if isAiming then
-                text = "[AIM MODE] Snowballs: " .. cachedSnowballCount .. " | G=Throw B=Aim"
-            else
-                text = "Snowballs: " .. cachedSnowballCount .. " | G=Throw B=Aim"
+                r, g, b = 100, 200, 255
+                bgR, bgG, bgB = 20, 50, 80
             end
             
-            SetTextScale(0.35, 0.35)
-            SetTextColor(255, 255, 255, 255)
+            local hudX = 0.5
+            local hudY = 0.85
+            
+            -- Draw main background
+            DrawTexture("generic_textures", "default_pedshot", hudX, hudY + 0.03, 0.15, 0.1, 0.0, bgR, bgG, bgB, 180)
+            
+            -- Draw snowball count
+            SetTextScale(0.45, 0.45)
+            SetTextColor(r, g, b, 255)
             SetTextCentre(true)
             SetTextDropshadow(1, 0, 0, 0, 255)
-            local str = CreateVarString(10, "LITERAL_STRING", text)
-            DisplayText(str, 0.5, 0.9)
+            local countStr = CreateVarString(10, "LITERAL_STRING", "Snowballs: " .. cachedSnowballCount)
+            DisplayText(countStr, hudX, hudY)
+            
+            -- Draw key prompts
+            SetTextScale(0.28, 0.28)
+            SetTextColor(r, g, b, 200)
+            SetTextCentre(true)
+            SetTextDropshadow(1, 0, 0, 0, 255)
+            
+            if isAiming then
+                -- Aiming mode keys
+                local aimStr = CreateVarString(10, "LITERAL_STRING", "[G] Throw    [B] Cancel")
+                DisplayText(aimStr, hudX, hudY + 0.04)
+            else
+                -- Normal mode keys
+                local normalStr = CreateVarString(10, "LITERAL_STRING", "[G] Throw    [B] Aim")
+                DisplayText(normalStr, hudX, hudY + 0.04)
+            end
         else
             Wait(500)
         end

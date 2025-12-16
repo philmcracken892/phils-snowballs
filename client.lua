@@ -18,22 +18,70 @@ local promptsDisabled = false
 local PickupPrompt = nil
 local PickupGroup = nil
 
--- Snow surface material hashes for RDR2/RedM
-local SnowMaterialHashes = {
-    -- Common snow hashes
-    951832588,
-    -1520033454,
-    -1942642813,
-    -824037923,
-    1635579929,
-    -1286696947,
-    -1885547121,
-    -461723753,
-    -- Ice hashes
-    -897054847,
-    126657546,
+----------------------------------------------------------------
+-- SNOW ZONE DEFINITIONS (Using Hash Values)
+----------------------------------------------------------------
+
+-- Snow Districts (ZoneTypeId 10) - Using hashes from your data
+local SnowDistricts = {
+    -----120156735,  -- GrizzliesEast (0xF8D68DC1)
+    1645618177,  -- GrizzliesWest (0x62162401)
 }
 
+-- Snow Locations (ZoneTypeId 12 - TEXT_WRITTEN) - Using hashes
+local SnowLocations = {
+    -1043500161, -- W_4_ADLER_RANCH
+    -2000021141, -- W_4_CAIRN_LODGE
+    -1496551068, -- W_4_COLTER
+    -545967610,  -- W_4_EWING_BASIN
+    1506834348,  -- W_4_MICAHS_HIDEOUT
+    1448805167,  -- W_4_FLATTENED_CABIN
+    320988519,   -- W_4_COCHINAY
+    -930437658,  -- W_4_DORMIN_CREST
+    -1692509313, -- W_4_LAKE_DON_JULIO_HOUSE
+    -1217490622, -- W_4_BEARTOOTH_BECK
+    1418297928,  -- W_4_DEADBOOT_CREEK
+    -1114958242, -- W_4_GRANITE_PASS
+    -1926488450, -- W_4_THREE_SISTERS
+    375900073,   -- W_4_NEKOTI_ROCK
+    -218679770,  -- W_4_SPIDER_GORGE (from creek data)
+    1246510947,  -- W_4_WINDOW_ROCK
+    -1821194396, -- W_4_FACE_ROCK
+    -2038495927, -- W_4_TEMPEST_RIM
+    1962976783,  -- W_4_DONNER_FALLS
+    1645047683,  -- W_4_CLAWSONS_REST
+    848488661,   -- W_4_CASTORS_RIDGE
+    -962704492,  -- W_4_COTORRA_SPRINGS
+    -735849380,  -- W_5_WAPITI_INDIAN_RESERVATION
+    1427239788,  -- W_5_VETTERS_ECHO
+}
+
+-- Snow Lakes/Ponds (ZoneTypeId 8) - Using hashes
+local SnowWater = {
+    -1073312073, -- WATER_CAIRN_LAKE
+    795414694,   -- WATER_BARROW_LAGOON
+    592454541,   -- WATER_LAKE_ISABELLA
+    -218679770,  -- WATER_SPIDER_GORGE
+    650214731,   -- WATER_BEARTOOTH_BECK
+}
+
+-- Snow Printed Text locations (ZoneTypeId 11) - Using hashes
+local SnowPrinted = {
+    1498241388,  -- P_3_BARROW_LAGOON
+    591254234,   -- P_3_CAIRN_LAKE
+    1688095983,  -- P_3_SPIDER_GORGE
+    1192830049,  -- P_3_AURORA_BASIN
+    1806114556,  -- P_3_MOUNT_HAGEN
+    -1217490622, -- P_4_BEARTOOTH_BECK
+    831787576,   -- P_4_LAKE_ISABELLA
+    -2038495927, -- P_4_TEMPEST_RIM
+    1962976783,  -- P_4_DONNER_FALLS
+    1246510947,  -- P_4_WINDOW_ROCK
+    -962704492,  -- P_4_COTORRA_SPRINGS
+    -1926488450, -- P_4_THREE_SISTERS
+    -1114958242, -- P_4_GRANITE_PASS
+   
+}
 -- Snow weather types
 local SnowWeatherHashes = {
     GetHashKey("SNOW"),
@@ -42,17 +90,24 @@ local SnowWeatherHashes = {
     GetHashKey("WHITEOUT"),
     GetHashKey("SNOWCLEARING"),
     GetHashKey("GROUNDBLIZZARD"),
-    GetHashKey("SLEET"),
+    GetHashKey("XMAS"),
 }
 
 ----------------------------------------------------------------
--- SNOW DETECTION FUNCTIONS
+-- ZONE DETECTION FUNCTIONS
 ----------------------------------------------------------------
+
+function GetZoneHash(zoneTypeId)
+    local ped = PlayerPedId()
+    local x, y, z = table.unpack(GetEntityCoords(ped))
+    local zoneHash = Citizen.InvokeNative(0x43AD8FC02B429D33, x, y, z, zoneTypeId)
+    return zoneHash or 0
+end
+
 function IsXmasEnabled()
     return Config.EnableXmas == true
 end
 
--- Check if current weather is snowy
 function IsSnowWeather()
     local currentWeather = GetPrevWeatherTypeHashName()
     local nextWeather = GetNextWeatherTypeHashName()
@@ -66,31 +121,35 @@ function IsSnowWeather()
     return false
 end
 
--- Check if standing on snow/ice ground using raycast
-function IsOnSnowGround()
-    local ped = PlayerPedId()
-    local coords = GetEntityCoords(ped)
-    
-    -- Cast a ray downward to get ground material
-    local startPos = vector3(coords.x, coords.y, coords.z + 0.5)
-    local endPos = vector3(coords.x, coords.y, coords.z - 2.0)
-    
-    local rayHandle = StartShapeTestRay(startPos.x, startPos.y, startPos.z, 
-                                         endPos.x, endPos.y, endPos.z, 
-                                         1, ped, 7)
-    
-    local retval, hit, endCoords, surfaceNormal, materialHash = GetShapeTestResultIncludingMaterial(rayHandle)
-    
-    if hit and materialHash then
-        for _, snowHash in ipairs(SnowMaterialHashes) do
-            if materialHash == snowHash then
-                return true
-            end
+function IsInSnowyRegion()
+    -- Check District (Type 10)
+    local district = GetZoneHash(10)
+    for _, snowHash in ipairs(SnowDistricts) do
+        if district == snowHash then
+            return true
         end
-        
-        -- Also check using string comparison for material names
-        local materialName = tostring(materialHash)
-        if string.find(string.lower(materialName), "snow") or string.find(string.lower(materialName), "ice") then
+    end
+    
+    -- Check Written Location (Type 12)
+    local location = GetZoneHash(12)
+    for _, snowHash in ipairs(SnowLocations) do
+        if location == snowHash then
+            return true
+        end
+    end
+    
+    -- Check Printed Location (Type 11)
+    local printed = GetZoneHash(11)
+    for _, snowHash in ipairs(SnowPrinted) do
+        if printed == snowHash then
+            return true
+        end
+    end
+    
+    -- Check Water (Type 8)
+    local water = GetZoneHash(8)
+    for _, snowHash in ipairs(SnowWater) do
+        if water == snowHash then
             return true
         end
     end
@@ -98,79 +157,23 @@ function IsOnSnowGround()
     return false
 end
 
--- Alternative method using ground probe
-function IsOnSnowGroundAlt()
-    local ped = PlayerPedId()
-    local coords = GetEntityCoords(ped)
-    
-    -- Use native to get surface material at coordinates
-    local groundHash = Citizen.InvokeNative(0x39C0F30A0D8C1A5B, coords.x, coords.y, coords.z, Citizen.ResultAsInteger())
-    
-    if groundHash then
-        for _, snowHash in ipairs(SnowMaterialHashes) do
-            if groundHash == snowHash then
-                return true
-            end
-        end
-    end
-    
-    return false
-end
-
--- Check if in known snowy regions based on coordinates (Grizzlies, Ambarino, etc.)
-function IsInSnowyRegion()
-    local ped = PlayerPedId()
-    local coords = GetEntityCoords(ped)
-    
-    -- The Grizzlies and Ambarino are generally in the northern part of the map
-    -- High elevation + northern coordinates typically mean snow
-    
-    -- Grizzlies West, Grizzlies East, Ambarino region
-    if coords.y > 1200.0 and coords.z > 100.0 then
-        return true
-    end
-    
-    -- Colter area
-    if coords.x > -1500.0 and coords.x < -1000.0 and coords.y > 1200.0 and coords.y < 1600.0 then
-        return true
-    end
-    
-    -- Mount Hagen area
-    if coords.x > -2200.0 and coords.x < -1800.0 and coords.y > 800.0 and coords.y < 1200.0 then
-        return true
-    end
-    
-    return false
-end
-
--- Main function to check if in snow zone (combines all methods)
 function CheckIfInSnowZone(coords)
     -- Priority 1: Christmas mode overrides everything
     if IsXmasEnabled() then
         return true, "Christmas"
     end
     
-    -- Priority 2: Check if standing on snow ground
-    if IsOnSnowGround() then
-        return true, "Snow Ground"
-    end
-    
-    -- Priority 3: Check alternative ground detection
-    if IsOnSnowGroundAlt() then
-        return true, "Snow Ground"
-    end
-    
-    -- Priority 4: Check current weather
+    -- Priority 2: Check current weather
     if IsSnowWeather() then
         return true, "Snow Weather"
     end
     
-    -- Priority 5: Check if in known snowy region
+    -- Priority 3: Check if in known snowy region (using native zones)
     if IsInSnowyRegion() then
         return true, "Snowy Region"
     end
     
-    -- Priority 6: Fallback to config zones if they exist
+    -- Priority 4: Fallback to config zones if they exist
     if Config.Snowball.SnowZones and #Config.Snowball.SnowZones > 0 then
         for _, zone in ipairs(Config.Snowball.SnowZones) do
             local distance = #(coords - zone.coords)
@@ -182,6 +185,10 @@ function CheckIfInSnowZone(coords)
     
     return false, nil
 end
+
+----------------------------------------------------------------
+-- UTILITY FUNCTIONS
+----------------------------------------------------------------
 
 function CanPickupSnow()
     if isPickingUp then return false end
@@ -239,6 +246,7 @@ end
 ----------------------------------------------------------------
 -- TOGGLE COMMAND
 ----------------------------------------------------------------
+
 RegisterCommand('snowball', function()
     promptsDisabled = not promptsDisabled
     
@@ -248,37 +256,28 @@ RegisterCommand('snowball', function()
         lib.notify({ title = 'Snowball', description = 'Prompts enabled', type = 'success', duration = 3000 })
     end
     
-    -- Save preference
     SetResourceKvp('snowball_prompts_disabled', promptsDisabled and 'true' or 'false')
 end, false)
 
--- Load saved preference
-CreateThread(function()
-    local saved = GetResourceKvpString('snowball_prompts_disabled')
-    if saved == 'true' then
-        promptsDisabled = true
-    end
-end)
 
--- Load saved preferences on resource start
+
+----------------------------------------------------------------
+-- LOAD SAVED PREFERENCES
+----------------------------------------------------------------
+
 CreateThread(function()
     local savedPrompts = GetResourceKvpString('snowball_prompts_disabled')
-    local savedHud = GetResourceKvpString('snowball_hud_disabled')
     
     if savedPrompts == 'true' then
         promptsDisabled = true
-    end
-    
-    if savedHud == 'true' then
-        Config.Snowball.ShowHUD = false
     end
 end)
 
 ----------------------------------------------------------------
 -- INITIALIZATION
 ----------------------------------------------------------------
+
 CreateThread(function()
-    -- Wait for config
     while Config == nil or Config.Snowball == nil do
         Wait(100)
     end
@@ -327,6 +326,10 @@ CreateThread(function()
         end
     end
 end)
+
+----------------------------------------------------------------
+-- SNOWBALL ACTIONS
+----------------------------------------------------------------
 
 function PickupSnowball()
     if not CanPickupSnow() then return end
@@ -471,6 +474,10 @@ CreateThread(function()
     end
 end)
 
+----------------------------------------------------------------
+-- TARGETING FUNCTIONS
+----------------------------------------------------------------
+
 function GetNearbyTargets(radius, includeNPCs)
     local targets = {}
     local myPed = PlayerPedId()
@@ -556,6 +563,10 @@ function DrawTargetMarker(target)
         DrawTexture("overhead", "overhead_marked_for_death", screenX, screenY, 0.02, 0.035, 0.0, r, g, b, 240)
     end
 end
+
+----------------------------------------------------------------
+-- THROWING FUNCTIONS
+----------------------------------------------------------------
 
 function SpawnSnowball(ped)
     local pos = GetEntityCoords(ped)
@@ -666,6 +677,7 @@ end
 ----------------------------------------------------------------
 -- KEYBIND CONTROLS
 ----------------------------------------------------------------
+
 CreateThread(function()
     while true do
         Wait(0)
@@ -706,6 +718,7 @@ end)
 ----------------------------------------------------------------
 -- MAIN PROMPT LOOP
 ----------------------------------------------------------------
+
 CreateThread(function()
     while not isReady do
         Wait(100)
@@ -713,7 +726,7 @@ CreateThread(function()
     
     local wasInZone = false
     local lastZoneCheck = 0
-    local zoneCheckInterval = 500 -- Check every 500ms instead of every frame
+    local zoneCheckInterval = 500
     
     while true do
         Wait(0)
@@ -723,7 +736,6 @@ CreateThread(function()
         local inVehicle = IsPedInAnyVehicle(ped, false)
         local isDead = IsEntityDead(ped)
         
-        -- Only check zone status periodically to save performance
         local currentTime = GetGameTimer()
         if currentTime - lastZoneCheck > zoneCheckInterval then
             lastZoneCheck = currentTime
@@ -731,10 +743,10 @@ CreateThread(function()
             local inZone, zoneName = CheckIfInSnowZone(coords)
             isInSnowZone = inZone
             
-            if inZone and not wasInZone then
-                local message = zoneName == "Snow Ground" and 'Standing on snow - you can pick up snowballs!' or 
-                               zoneName == "Snow Weather" and 'Snowy weather - you can pick up snowballs!' or
+            if inZone and not wasInZone and not promptsDisabled then
+                local message = zoneName == "Snow Weather" and 'Snowy weather - you can pick up snowballs!' or
                                zoneName == "Snowy Region" and 'In snowy region - you can pick up snowballs!' or
+                               zoneName == "Christmas" and 'Christmas mode - you can pick up snowballs everywhere!' or
                                'You can pick up snowballs here!'
                 lib.notify({ title = 'Snow Zone', description = message, type = 'inform', duration = 4000 })
             end
@@ -770,6 +782,7 @@ end)
 ----------------------------------------------------------------
 -- HUD
 ----------------------------------------------------------------
+
 CreateThread(function()
     while true do
         if Config.Snowball and Config.Snowball.ShowHUD and isReady and cachedSnowballCount > 0 then
@@ -816,6 +829,7 @@ end)
 ----------------------------------------------------------------
 -- EVENTS
 ----------------------------------------------------------------
+
 RegisterNetEvent('rsg-snowball:client:hit', function(damage)
     local ped = PlayerPedId()
     ApplyDamageToPed(ped, damage, false)
@@ -846,6 +860,7 @@ end)
 ----------------------------------------------------------------
 -- EXPORTS
 ----------------------------------------------------------------
+
 exports('GetSnowballCount', GetSnowballCount)
 exports('ThrowSnowball', ThrowSnowball)
 exports('HasSnowballs', HasSnowballs)
@@ -854,6 +869,7 @@ exports('IsInSnowZone', function() return isInSnowZone end)
 ----------------------------------------------------------------
 -- CLEANUP
 ----------------------------------------------------------------
+
 AddEventHandler('onResourceStop', function(name)
     if name ~= GetCurrentResourceName() then return end
     

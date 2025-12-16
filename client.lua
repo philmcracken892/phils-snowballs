@@ -548,6 +548,8 @@ function ToggleAiming()
     
     if cachedSnowballCount <= 0 then
         lib.notify({ title = 'Snowball', description = 'No snowballs to aim!', type = 'error', duration = 3000 })
+        isAiming = false
+        targetEntity = nil
         return
     end
     
@@ -647,8 +649,14 @@ CreateThread(function()
             end
         end
         
+        -- AUTO-DISABLE AIM MODE WHEN NO SNOWBALLS
+        if isAiming and cachedSnowballCount <= 0 then
+            isAiming = false
+            targetEntity = nil
+        end
         
-        if isAiming and not isThrowing then
+        -- Only draw target marker if aiming AND have snowballs
+        if isAiming and not isThrowing and cachedSnowballCount > 0 then
             targetEntity = GetEntityInCrosshair()
             if targetEntity then
                 DrawTargetMarker(targetEntity)

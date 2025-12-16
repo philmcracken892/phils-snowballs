@@ -14,7 +14,7 @@ local lastPickupTime = 0
 local isInSnowZone = false
 local activeSnowballs = {}
 local cachedSnowballCount = 0
-
+local promptsDisabled = false
 local PickupPrompt = nil
 local PickupGroup = nil
 
@@ -235,6 +235,44 @@ function CreatePrompts()
     PromptSetGroup(PickupPrompt, PickupGroup, 0)
     PromptRegisterEnd(PickupPrompt)
 end
+
+----------------------------------------------------------------
+-- TOGGLE COMMAND
+----------------------------------------------------------------
+RegisterCommand('snowball', function()
+    promptsDisabled = not promptsDisabled
+    
+    if promptsDisabled then
+        lib.notify({ title = 'Snowball', description = 'Prompts disabled', type = 'inform', duration = 3000 })
+    else
+        lib.notify({ title = 'Snowball', description = 'Prompts enabled', type = 'success', duration = 3000 })
+    end
+    
+    -- Save preference
+    SetResourceKvp('snowball_prompts_disabled', promptsDisabled and 'true' or 'false')
+end, false)
+
+-- Load saved preference
+CreateThread(function()
+    local saved = GetResourceKvpString('snowball_prompts_disabled')
+    if saved == 'true' then
+        promptsDisabled = true
+    end
+end)
+
+-- Load saved preferences on resource start
+CreateThread(function()
+    local savedPrompts = GetResourceKvpString('snowball_prompts_disabled')
+    local savedHud = GetResourceKvpString('snowball_hud_disabled')
+    
+    if savedPrompts == 'true' then
+        promptsDisabled = true
+    end
+    
+    if savedHud == 'true' then
+        Config.Snowball.ShowHUD = false
+    end
+end)
 
 ----------------------------------------------------------------
 -- INITIALIZATION
@@ -703,7 +741,7 @@ CreateThread(function()
             wasInZone = inZone
         end
         
-        if isInSnowZone and not inVehicle and not isDead and not isPickingUp and not isThrowing then
+        if isInSnowZone and not inVehicle and not isDead and not isPickingUp and not isThrowing and not promptsDisabled then
             if PickupPrompt and PickupGroup then
                 local label = CreateVarString(10, "LITERAL_STRING", "Snow")
                 PromptSetActiveGroupThisFrame(PickupGroup, label)
